@@ -1,0 +1,234 @@
+﻿<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Token 用量仪表板</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:#0f172a;color:#e2e8f0;min-height:100vh;padding:24px}
+h1{font-size:28px;font-weight:700;margin-bottom:4px;background:linear-gradient(135deg,#60a5fa,#a78bfa);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+.subtitle{color:#94a3b8;margin-bottom:8px;font-size:14px}
+.status-bar{display:flex;align-items:center;gap:12px;margin-bottom:24px;font-size:13px;color:#64748b}
+.status-dot{width:8px;height:8px;border-radius:50%;background:#64748b;transition:background .3s}
+.status-dot.active{background:#22c55e;animation:pulse 2s infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:0.5}}
+.refresh-btn{background:#334155;border:1px solid #475569;color:#e2e8f0;padding:6px 16px;border-radius:8px;cursor:pointer;font-size:13px;transition:all .2s}
+.refresh-btn:hover{background:#475569}
+.refresh-btn:disabled{opacity:0.5;cursor:not-allowed}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:16px;margin-bottom:24px}
+.card{background:#1e293b;border-radius:16px;padding:24px;border:1px solid #334155}
+.card-label{font-size:13px;color:#94a3b8;margin-bottom:8px;text-transform:uppercase;letter-spacing:0.5px}
+.card-value{font-size:32px;font-weight:700;color:#f8fafc}
+.card-sub{font-size:13px;color:#64748b;margin-top:4px}
+.ic{color:#60a5fa}.oc{color:#f472b6}.cc{color:#34d399}.imgc{color:#fbbf24}.vidc{color:#fb7185}
+.chart-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:24px}
+.chart-card{background:#1e293b;border-radius:16px;padding:24px;border:1px solid #334155}
+.chart-card h3{font-size:16px;font-weight:600;margin-bottom:16px;color:#e2e8f0}
+.chart-container{position:relative;height:280px}
+.table-card{background:#1e293b;border-radius:16px;padding:24px;border:1px solid #334155}
+.table-card h3{font-size:16px;font-weight:600;margin-bottom:16px;color:#e2e8f0}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th{text-align:left;padding:10px 12px;color:#94a3b8;font-weight:500;border-bottom:1px solid #334155}
+td{padding:10px 12px;border-bottom:1px solid #1e293b}
+tr:hover td{background:#334155}
+.badge{display:inline-block;padding:2px 8px;border-radius:4px;font-size:12px}
+.badge-success{background:#22c55e20;color:#22c55e}
+.badge-model{background:#6366f120;color:#a5b4fc}
+.loading{text-align:center;padding:40px;color:#64748b}
+</style>
+</head>
+<body>
+<h1>Token 用量仪表板</h1>
+<p class="subtitle">数据来源: platform.agnes-ai.cn | 模型: agnes-2.0-flash</p>
+<div class="status-bar">
+  <span class="status-dot" id="statusDot"></span>
+  <span id="statusText">加载中...</span>
+  <span id="lastFetch"></span>
+  <button class="refresh-btn" id="refreshBtn" onclick="refreshData()">刷新数据</button>
+</div>
+<div class="grid">
+  <div class="card"><div class="card-label">总 Token 用量</div><div class="card-value" style="color:#a78bfa" id="totalTokens">-</div><div class="card-sub">共 <span id="totalCount">-</span> 次请求</div></div>
+  <div class="card"><div class="card-label">输入 Tokens</div><div class="card-value ic" id="totalInput">-</div><div class="card-sub">占总量的 <span id="inputPct">-</span>%</div></div>
+  <div class="card"><div class="card-label">输出 Tokens</div><div class="card-value oc" id="totalOutput">-</div><div class="card-sub">占总量的 <span id="outputPct">-</span>%</div></div>
+  <div class="card"><div class="card-label">缓存命中 Tokens</div><div class="card-value cc" id="totalCache">-</div><div class="card-sub">缓存命中率 <span id="cachePct">-</span>%</div></div>
+  <div class="card"><div class="card-label">图片生成数</div><div class="card-value imgc" id="imageCount">-</div><div class="card-sub">图片生成请求</div></div>
+  <div class="card"><div class="card-label">视频生成时长</div><div class="card-value vidc" id="videoSeconds">-</div><div class="card-sub">生成总秒数</div></div>
+</div>
+
+<div class="chart-grid">
+  <div class="chart-card"><h3>Token 用量趋势 (按分钟)</h3><div class="chart-container"><canvas id="timeChart"></canvas></div></div>
+  <div class="chart-card"><h3>Token 类型分布</h3><div class="chart-container"><canvas id="pieChart"></canvas></div></div>
+</div>
+
+<div class="chart-grid">
+  <div class="chart-card"><h3>每小时 Token 用量</h3><div class="chart-container"><canvas id="hourChart"></canvas></div></div>
+  <div class="chart-card"><h3>每分钟总 Token 量</h3><div class="chart-container"><canvas id="totalChart"></canvas></div></div>
+</div>
+
+<div class="table-card">
+  <h3>最近请求记录</h3>
+  <table>
+    <thead><tr><th>时间</th><th>模型</th><th>输入 Tokens</th><th>输出 Tokens</th><th>缓存命中</th><th>总计</th><th>状态</th></tr></thead>
+    <tbody id="tableBody"><tr><td colspan="7" class="loading">加载中...</td></tr></tbody>
+  </table>
+</div>
+
+<script>
+let charts = {};
+
+const API = '';
+
+function statusCN(s) { return s === 'success' ? '成功' : s; }
+
+function fmt(n) {
+  if (n >= 1e9) return (n/1e9).toFixed(2) + 'B';
+  if (n >= 1e6) return (n/1e6).toFixed(2) + 'M';
+  if (n >= 1e3) return (n/1e3).toFixed(1) + 'K';
+  return n.toString();
+}
+
+function mediaTotals(data) {
+  const rows = data.rawData || [];
+  return {
+    imageCount: Number(data.summary?.imageCount ?? rows.filter(row => /image/i.test(row.model || '')).length),
+    videoSeconds: Number(data.summary?.videoSeconds ?? rows.reduce((sum, row) => sum + Number(row.videoSeconds || 0), 0))
+  };
+}
+
+async function fetchData() {
+  try {
+    const res = await fetch(API + '/api/data');
+    const data = await res.json();
+    updateUI(data);
+  } catch(e) { console.error('Fetch error:', e); }
+}
+
+async function refreshData() {
+  const btn = document.getElementById('refreshBtn');
+  btn.disabled = true;
+  btn.textContent = '刷新中...';
+  document.getElementById('statusDot').classList.add('active');
+  document.getElementById('statusText').textContent = '正在刷新...';
+  try {
+    await fetch(API + '/api/refresh');
+    await new Promise(resolve => setTimeout(resolve, 5000));
+    await fetchData();
+  } catch(e) { console.error('Refresh error:', e); }
+  btn.disabled = false;
+  btn.textContent = '刷新数据';
+}
+
+function updateUI(data) {
+  window.currentData = data;
+  if (!data.summary) return;
+  const s = data.summary;
+  const media = mediaTotals(data);
+  document.getElementById('totalTokens').textContent = fmt(s.totalTokens);
+  document.getElementById('totalCount').textContent = s.totalCount;
+  document.getElementById('totalInput').textContent = fmt(s.totalInput);
+  document.getElementById('totalOutput').textContent = fmt(s.totalOutput);
+  document.getElementById('totalCache').textContent = fmt(s.totalCache);
+  document.getElementById('imageCount').textContent = media.imageCount.toLocaleString();
+  document.getElementById('videoSeconds').textContent = media.videoSeconds.toLocaleString(undefined, { maximumFractionDigits: 2 }) + ' 秒';
+  document.getElementById('inputPct').textContent = (s.totalInput/s.totalTokens*100).toFixed(1);
+  document.getElementById('outputPct').textContent = (s.totalOutput/s.totalTokens*100).toFixed(1);
+  document.getElementById('cachePct').textContent = (s.totalCache/s.totalTokens*100).toFixed(1);
+  document.getElementById('statusDot').classList.remove('active');
+  document.getElementById('statusText').textContent = '已更新';
+  document.getElementById('lastFetch').textContent = data.lastFetchTime ? '最后更新: ' + new Date(data.lastFetchTime).toLocaleString('zh-CN') : '';
+  renderCharts(data);
+  renderTable(data);
+}
+
+function renderCharts(data) {
+  const co = (yLabel) => ({
+    responsive: true, maintainAspectRatio: false,
+    plugins: { legend: { labels: { color: '#94a3b8' } } },
+    scales: {
+      x: { ticks: { color: '#64748b', maxTicksLimit: 10 }, grid: { color: '#334155' } },
+      y: { ticks: { color: '#64748b', callback: v => fmt(v) }, grid: { color: '#334155' } }
+    }
+  });
+
+  if (charts.time) charts.time.destroy();
+  charts.time = new Chart(document.getElementById('timeChart'), {
+    type: 'line',
+    data: {
+      labels: data.byMinute?.labels || [],
+      datasets: [
+        { label: '输入', data: data.byMinute?.input || [], borderColor: '#60a5fa', backgroundColor: '#60a5fa20', fill: true, tension: 0.4, borderWidth: 2 },
+        { label: '输出', data: data.byMinute?.output || [], borderColor: '#f472b6', backgroundColor: '#f472b620', fill: true, tension: 0.4, borderWidth: 2 },
+        { label: '缓存命中', data: data.byMinute?.cache || [], borderColor: '#34d399', backgroundColor: '#34d39920', fill: true, tension: 0.4, borderWidth: 2 }
+      ]
+    },
+    options: co()
+  });
+
+  if (charts.pie) charts.pie.destroy();
+  charts.pie = new Chart(document.getElementById('pieChart'), {
+    type: 'doughnut',
+    data: {
+      labels: ['输入 Tokens', '输出 Tokens', '缓存命中 Tokens'],
+      datasets: [{ data: [data.summary?.totalInput||0, data.summary?.totalOutput||0, data.summary?.totalCache||0], backgroundColor: ['#60a5fa', '#f472b6', '#34d399'], borderWidth: 0 }]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { position: 'bottom', labels: { color: '#94a3b8', padding: 20 } }, tooltip: { callbacks: { label: ctx => ctx.label + ': ' + ctx.parsed.toLocaleString() } } }
+    }
+  });
+
+  if (charts.hour) charts.hour.destroy();
+  charts.hour = new Chart(document.getElementById('hourChart'), {
+    type: 'bar',
+    data: {
+      labels: data.byHour?.labels || [],
+      datasets: [
+        { label: '输入', data: data.byHour?.input || [], backgroundColor: '#60a5fa', borderRadius: 4 },
+        { label: '输出', data: data.byHour?.output || [], backgroundColor: '#f472b6', borderRadius: 4 },
+        { label: '缓存命中', data: data.byHour?.cache || [], backgroundColor: '#34d399', borderRadius: 4 }
+      ]
+    },
+    options: { ...co(), scales: { ...co().scales, x: { ...co().scales.x, stacked: true }, y: { ...co().scales.y, stacked: true } } }
+  });
+
+  if (charts.total) charts.total.destroy();
+  const totalPerMin = (data.byMinute?.input || []).map((v, i) => v + (data.byMinute?.output || [])[i] + (data.byMinute?.cache || [])[i]);
+  charts.total = new Chart(document.getElementById('totalChart'), {
+    type: 'bar',
+    data: {
+      labels: data.byMinute?.labels || [],
+      datasets: [{ label: '总 Token 数', data: totalPerMin, backgroundColor: '#a78bfa80', borderColor: '#a78bfa', borderWidth: 1, borderRadius: 4 }]
+    },
+    options: { ...co(), plugins: { legend: { display: false } } }
+  });
+}
+
+function renderTable(data) {
+  const tbody = document.getElementById('tableBody');
+  const rows = (data.rawData || []).slice().reverse().slice(0, 50);
+  if (rows.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="7" class="loading">暂无数据，点击"刷新数据"获取</td></tr>';
+    return;
+  }
+  tbody.innerHTML = rows.map(row =>
+    `<tr>
+      <td>${row.time}</td>
+      <td><span class="badge badge-model">${row.model}</span></td>
+      <td class="ic">${fmt(row.inputTokens)}</td>
+      <td class="oc">${fmt(row.outputTokens)}</td>
+      <td class="cc">${fmt(row.cacheTokens)}</td>
+      <td>${fmt(row.totalTokens)}</td>
+      <td><span class="badge badge-success">${statusCN(row.status)}</span></td>
+    </tr>`
+  ).join('');
+}
+
+// Initial load only; refreshes happen through the button.
+fetchData();
+</script>
+</body>
+</html>
+
+

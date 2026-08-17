@@ -1,0 +1,10 @@
+node_modules/
+.env
+data.json
+stdout.log
+stderr.log
+dashboard_preview.png
+video/
+fix_html.js
+fetch.ps1
+settings.json
