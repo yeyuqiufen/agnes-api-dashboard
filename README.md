@@ -36,3 +36,5 @@ Open http://localhost:3001. The page loads data once; click the refresh button t
 ## GitHub
 
 Do not commit `.env`, `data.json`, video renders, or real tokens. They are ignored by default. Other users should copy `.env.example` to `.env` and enter their own token.
+
+Public repository: https://github.com/yeyuqiufen/agnes-api-dashboard
